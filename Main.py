@@ -451,44 +451,35 @@ class Game:
             self.victory = True
 
     def draw(self):
-    # 1. Clean black slate
-    self.screen.fill((0,0,0))
+        # Everything from here down must be indented 4 spaces further than the line above
+        self.screen.fill((0,0,0))
 
-    # 2. Get the player's current field of view
-    poly = self.vision.compute_fov_polygon(self.player)
+        poly = self.vision.compute_fov_polygon(self.player)
 
-    # 3. Create the Fog (Background Darkness)
-    fog = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-    fog.fill((0, 0, 0, 255))  # Pure black
-    if len(poly) > 2:
-        pygame.draw.polygon(fog, (0, 0, 0, 0), poly) # Cut out current vision
-    self.screen.blit(fog, (0, 0))
+        fog = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        fog.fill((0, 0, 0, 255)) 
+        if len(poly) > 2:
+            pygame.draw.polygon(fog, (0, 0, 0, 0), poly)
+        self.screen.blit(fog, (0, 0))
 
-    # 4. Draw "Memories" on top of the dark fog
-    for gy in range(len(self.explored)):
-        for gx in range(len(self.explored[0])):
-            if self.explored[gy][gx]:
-                cell_rect = pygame.Rect(gx * GRID_SIZE, gy * GRID_SIZE, GRID_SIZE, GRID_SIZE)
-                pygame.draw.rect(self.screen, (40, 40, 40), cell_rect)
+        for gy in range(len(self.explored)):
+            for gx in range(len(self.explored[0])):
+                if self.explored[gy][gx]:
+                    cell_rect = pygame.Rect(gx * 64, gy * 64, 64, 64) # Replace 64 with GRID_SIZE if needed
+                    pygame.draw.rect(self.screen, (40, 40, 40), cell_rect)
 
-    # Draw faint walls/doors for explored areas
-    for wall in self.game_map.walls:
-        if self.rect_discovered(wall):
-            pygame.draw.rect(self.screen, (60, 60, 60), wall)
-            
-    for door in self.game_map.doors:
-        if self.rect_discovered(door[:4]):
-            # Darkened door colors (brown or green)
-            c = (70, 40, 20) if not door[4] else (50, 70, 45)
-            pygame.draw.rect(self.screen, c, (door[0], door[1], door[2], door[3]))
+        for wall in self.game_map.walls:
+            if self.rect_discovered(wall):
+                pygame.draw.rect(self.screen, (60, 60, 60), wall)
+        
+        for door in self.game_map.doors:
+            if self.rect_discovered(door[:4]):
+                c = (70, 40, 20) if not door[4] else (50, 70, 45)
+                pygame.draw.rect(self.screen, c, (door[0], door[1], door[2], door[3]))
 
-    # 5. Draw the "Bright Now" (Current FOV)
-    # This draws over the memory with full colors/moving enemies
-    self.draw_visible_objects(poly)
-
-    # 6. UI
-    self.draw_ui()
-    pygame.display.flip()
+        self.draw_visible_objects(poly)
+        self.draw_ui()
+        pygame.display.flip()
 
 if __name__ == "__main__":
     game = Game()
