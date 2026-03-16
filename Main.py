@@ -1,485 +1,545 @@
 import math
 import random
-import arcade
-from typing import List, Tuple
+import sys
+import pygame
 
-# Constants
+# --- Constants ---
 SCREEN_WIDTH = 1280
-SCREEN_HEIGHT = 800
-SCREEN_TITLE = "Tactical CQB - Vision Cone + Fog" 
+SCREEN_HEIGHT = 720
+FPS = 60
 
-PLAYER_SPEED = 240
-PLAYER_RADIUS = 12
-PLAYER_FOV_DEGREES = 90
-PLAYER_VIEW_DISTANCE = 300
+GRID_SIZE = 16
 
-ENEMY_SPEED = 120
-ENEMY_FOV_DEGREES = 90
+PLAYER_SPEED = 200
+PLAYER_RADIUS = 14
+PLAYER_FOV = math.radians(70)
+PLAYER_VIEW_DISTANCE = 280
+
+ENEMY_SPEED = 100
+ENEMY_RADIUS = 13
+ENEMY_FOV = math.radians(70)
 ENEMY_VIEW_DISTANCE = 260
 
-WALL_THICKNESS = 8
-
-FOG_CELL = 20
-
-# Colors
-FLOOR_COLOR = arcade.color.DIM_GRAY
-WALL_COLOR = arcade.color.LIGHT_GRAY
-PLAYER_COLOR = arcade.color.SKY_BLUE
-ENEMY_COLOR = arcade.color.CRIMSON
-DOOR_COLOR = arcade.color.OLIVE
+BULLET_SPEED = 700
+BULLET_LIFETIME = 1.0
 
 
-def clamp(x, minimum, maximum):
-    return max(minimum, min(maximum, x))
+# --- Geometry helpers ---
+
+def clamp(v, a, b):
+    return max(a, min(b, v))
 
 
-def vector_from_angle(angle_radians: float) -> Tuple[float, float]:
-    return math.cos(angle_radians), math.sin(angle_radians)
-
-
-def dist(a: Tuple[float, float], b: Tuple[float, float]) -> float:
-    return math.hypot(a[0] - b[0], a[1] - b[1])
-
-
-def point_on_segment(px, py, x1, y1, x2, y2):
-    # check if point on segment
-    cross = (py - y1) * (x2 - x1) - (px - x1) * (y2 - y1)
-    if abs(cross) > 1e-5:
-        return False
-    dot = (px - x1) * (px - x2) + (py - y1) * (py - y2)
-    return dot <= 0
-
-
-def segment_intersection(p1, p2, p3, p4):
-    # return intersection point of line seg p1p2 and p3p4 or None
+def segment_intersect(p1, p2, q1, q2):
+    # returns (ix, iy, t, u) if intersects else None
     x1, y1 = p1
     x2, y2 = p2
-    x3, y3 = p3
-    x4, y4 = p4
+    x3, y3 = q1
+    x4, y4 = q2
     denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
     if abs(denom) < 1e-6:
         return None
     t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom
-    u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / denom
+    u = ((x1 - x3) * (y1 - y2) - (y1 - y3) * (x1 - x2)) / denom
     if 0 <= t <= 1 and 0 <= u <= 1:
         ix = x1 + t * (x2 - x1)
         iy = y1 + t * (y2 - y1)
-        return ix, iy
+        return ix, iy, t, u
     return None
 
 
-class Wall:
-    def __init__(self, x1, y1, x2, y2):
-        self.x1 = x1
-        self.y1 = y1
-        self.x2 = x2
-        self.y2 = y2
-
-    def draw(self):
-        arcade.draw_line(self.x1, self.y1, self.x2, self.y2, WALL_COLOR, WALL_THICKNESS)
-
-    def intersects_ray(self, sx, sy, ex, ey):
-        inter = segment_intersection((sx, sy), (ex, ey), (self.x1, self.y1), (self.x2, self.y2))
-        if not inter:
-            return None
-        d = dist((sx, sy), inter)
-        return d, inter
+def point_in_polygon(x, y, polygon):
+    inside = False
+    n = len(polygon)
+    for i in range(n):
+        x1, y1 = polygon[i]
+        x2, y2 = polygon[(i + 1) % n]
+        if ((y1 > y) != (y2 > y)) and (x < (x2 - x1) * (y - y1) / (y2 - y1 + 1e-9) + x1):
+            inside = not inside
+    return inside
 
 
-class Door:
-    def __init__(self, x1, y1, x2, y2):
-        self.x1 = x1
-        self.y1 = y1
-        self.x2 = x2
-        self.y2 = y2
-        self.is_open = True
-
-    def draw(self):
-        arcade.draw_line(self.x1, self.y1, self.x2, self.y2, DOOR_COLOR, WALL_THICKNESS)
+def dist(a, b):
+    return math.hypot(a[0]-b[0], a[1]-b[1])
 
 
-class Player:
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-        self.angle = 0.0
-        self.vx = 0
-        self.vy = 0
-        self.health = 100
-        self.attack_cooldown = 0.0
-
-    def update(self, delta_time, walls):
-        speed = PLAYER_SPEED
-        nx = self.x + self.vx * speed * delta_time
-        ny = self.y + self.vy * speed * delta_time
-        # collision with walls simple
-        for wall in walls:
-            # approximate wall as expanded line, avoid internal
-            pass
-        self.x = clamp(nx, 20, SCREEN_WIDTH - 20)
-        self.y = clamp(ny, 20, SCREEN_HEIGHT - 20)
-        self.attack_cooldown = max(0, self.attack_cooldown - delta_time)
-
-    def draw(self):
-        # draw player body
-        arcade.draw_circle_filled(self.x, self.y, PLAYER_RADIUS, PLAYER_COLOR)
-        # draw direction pointer
-        dx, dy = vector_from_angle(self.angle)
-        arcade.draw_line(self.x, self.y, self.x + dx * 22, self.y + dy * 22, arcade.color.WHITE, 3)
-        arcade.draw_circle_outline(self.x, self.y, PLAYER_RADIUS + 1, arcade.color.BLACK)
-
-    def shoot(self, target_x, target_y):
-        if self.attack_cooldown > 0:
-            return None
-        self.attack_cooldown = 0.16
-        dx = target_x - self.x
-        dy = target_y - self.y
-        mag = math.hypot(dx, dy)
-        if mag < 1:
-            return None
-        return Bullet(self.x + dx / mag * 20, self.y + dy / mag * 20, dx / mag * 560, dy / mag * 560, arcade.color.YELLOW)
+def line_intersects_walls(p1, p2, walls):
+    for wall in walls:
+        # wall is (x,y,w,h)
+        x, y, w, h = wall
+        edges = [((x, y), (x + w, y)), ((x + w, y), (x + w, y + h)), ((x + w, y + h), (x, y + h)), ((x, y + h), (x, y))]
+        for e in edges:
+            if segment_intersect(p1, p2, e[0], e[1]):
+                return True
+    return False
 
 
-class Enemy:
-    def __init__(self, x, y, patrol: List[Tuple[float, float]] = None):
-        self.x = x
-        self.y = y
-        self.angle = 0
-        self.health = 60
-        self.patrol = patrol or []
-        self.patrol_index = 0
-        self.state = "guard"
-        self.agro_time = 0
-        self.shoot_cd = 0
-
-    def draw(self):
-        arcade.draw_circle_filled(self.x, self.y, 11, ENEMY_COLOR)
-        dx, dy = vector_from_angle(self.angle)
-        arcade.draw_line(self.x, self.y, self.x + dx * 16, self.y + dy * 16, arcade.color.BLACK, 2)
-
-    def update(self, delta_time, player, walls):
-        self.shoot_cd = max(0, self.shoot_cd - delta_time)
-        if self.health <= 0:
-            return
-
-        seen, _ = self.can_see_player(player, walls)
-        if seen:
-            self.state = "aggressive"
-            self.agro_time = 1.2
-
-        if self.state == "aggressive":
-            self.agro_time -= delta_time
-            if self.agro_time <= 0:
-                self.state = "guard"
-        if self.state == "aggressive":
-            # move toward player
-            dx = player.x - self.x
-            dy = player.y - self.y
-            distp = math.hypot(dx, dy)
-            if distp > 8:
-                self.x += (dx / distp) * ENEMY_SPEED * delta_time
-                self.y += (dy / distp) * ENEMY_SPEED * delta_time
-            self.angle = math.atan2(dy, dx)
-        elif self.patrol:
-            tx, ty = self.patrol[self.patrol_index]
-            dx = tx - self.x
-            dy = ty - self.y
-            d = math.hypot(dx, dy)
-            if d < 8:
-                self.patrol_index = (self.patrol_index + 1) % len(self.patrol)
-            else:
-                self.angle = math.atan2(dy, dx)
-                self.x += (dx / d) * ENEMY_SPEED * delta_time
-                self.y += (dy / d) * ENEMY_SPEED * delta_time
-
-    def can_see_player(self, player, walls):
-        dx = player.x - self.x
-        dy = player.y - self.y
-        d = math.hypot(dx, dy)
-        if d > ENEMY_VIEW_DISTANCE:
-            return False, None
-        dirx, diry = vector_from_angle(self.angle)
-        dot = (dx * dirx + dy * diry) / (d + 1e-9)
-        if dot < math.cos(math.radians(ENEMY_FOV_DEGREES / 2)):
-            return False, None
-        # raycast to player
-        blocked = False
-        for wall in walls:
-            if segment_intersection((self.x, self.y), (player.x, player.y), (wall.x1, wall.y1), (wall.x2, wall.y2)):
-                blocked = True
-                break
-        return not blocked, d
-
-
-class Bullet:
-    def __init__(self, x, y, vx, vy, color):
-        self.x = x
-        self.y = y
-        self.vx = vx
-        self.vy = vy
-        self.color = color
-        self.life = 1.2
-
-    def update(self, delta_time):
-        self.life -= delta_time
-        self.x += self.vx * delta_time
-        self.y += self.vy * delta_time
-
-    def draw(self):
-        arcade.draw_circle_filled(self.x, self.y, 3, self.color)
-
-
+# --- Map ---
 class Map:
     def __init__(self):
-        self.walls: List[Wall] = []
-        self.doors: List[Door] = []
-        self.create_room_layout()
+        self.walls = []
+        self.doors = []
+        self.build_map()
 
-    def create_room_layout(self):
-        # Outer boundary
-        self._rect_walls(50, 50, SCREEN_WIDTH - 50, SCREEN_HEIGHT - 50)
+    def build_map(self):
+        # Outer walls
+        self.walls.append((0, 0, SCREEN_WIDTH, 20))
+        self.walls.append((0, 0, 20, SCREEN_HEIGHT))
+        self.walls.append((SCREEN_WIDTH-20, 0, 20, SCREEN_HEIGHT))
+        self.walls.append((0, SCREEN_HEIGHT-20, SCREEN_WIDTH, 20))
 
-        # interior rooms
-        self._rect_walls(120, 120, 520, 380)
-        self._rect_walls(680, 100, 1200, 360)
-        self._rect_walls(130, 450, 520, 720)
-        self._rect_walls(680, 430, 1200, 720)
+        # Rooms and corridors
+        self.walls.extend([
+            (120, 60, 20, 520),
+            (120, 60, 640, 20),
+            (740, 60, 20, 320),
+            (320, 320, 440, 20),
+            (320, 320, 20, 250),
+            (220, 420, 120, 20),
+            (220, 420, 20, 180),
+            (220, 580, 360, 20),
+            (560, 380, 20, 220),
+            (760, 380, 360, 20),
+            (1100, 380, 20, 180),
+            (880, 120, 20, 220),
+            (760, 120, 340, 20),
+            (760, 120, 20, 180),
+        ])
 
-        # hallways between rooms
-        self.doors.append(Door(520, 250, 680, 250))
-        self.doors.append(Door(520, 560, 680, 560))
-        self.doors.append(Door(320, 380, 320, 450))
-        self.doors.append(Door(880, 380, 880, 450))
+        # doors: (x,y,w,h,open)
+        self.doors.append([740, 160, 20, 60, False])
+        self.doors.append([380, 300, 60, 20, False])
 
-    def _rect_walls(self, x1, y1, x2, y2):
-        self.walls.append(Wall(x1, y1, x2, y1))
-        self.walls.append(Wall(x2, y1, x2, y2))
-        self.walls.append(Wall(x2, y2, x1, y2))
-        self.walls.append(Wall(x1, y2, x1, y1))
-
-    def draw(self):
-        # floor
-        arcade.draw_lrtb_rectangle_filled(50, SCREEN_WIDTH - 50, SCREEN_HEIGHT - 50, 50, arcade.color.DARK_SLATE_GRAY)
+    def collides(self, rect):
+        r = pygame.Rect(rect)
         for wall in self.walls:
-            wall.draw()
+            if r.colliderect(pygame.Rect(wall)):
+                return True
         for door in self.doors:
-            door.draw()
+            if not door[4] and r.colliderect(pygame.Rect(door[0], door[1], door[2], door[3])):
+                return True
+        return False
+
+    def draw(self, surf, is_faint=False):
+        # floor
+        floor = (80, 80, 80) if is_faint else (125, 125, 125)
+        surf.fill((20, 20, 20))
+        for y in range(0, SCREEN_HEIGHT, 64):
+            for x in range(0, SCREEN_WIDTH, 64):
+                pygame.draw.rect(surf, floor, (x, y, 64, 64), 0)
+                pygame.draw.rect(surf, (floor[0]+10, floor[1]+10, floor[2]+10), (x, y, 64, 64), 1)
+
+        wall_color = (60, 60, 60) if is_faint else (180, 180, 180)
+        for wall in self.walls:
+            pygame.draw.rect(surf, wall_color, wall)
+        for door in self.doors:
+            color = (80, 30, 0) if not door[4] else (100, 120, 50)
+            pygame.draw.rect(surf, color, (door[0], door[1], door[2], door[3]))
+
+    def toggle_door_at(self, px, py):
+        for door in self.doors:
+            dx, dy, dw, dh, open_flag = door
+            if dx <= px <= dx + dw and dy <= py <= dy + dh:
+                door[4] = not door[4]
+                return True
+        return False
+
+    def get_block_segments(self):
+        segments = []
+        for wall in self.walls:
+            x, y, w, h = wall
+            segments.append(((x, y), (x + w, y)))
+            segments.append(((x + w, y), (x + w, y + h)))
+            segments.append(((x + w, y + h), (x, y + h)))
+            segments.append(((x, y + h), (x, y)))
+        for door in self.doors:
+            if not door[4]:
+                x, y, w, h, _ = door
+                segments.append(((x, y), (x + w, y)))
+                segments.append(((x + w, y), (x + w, y + h)))
+                segments.append(((x + w, y + h), (x, y + h)))
+                segments.append(((x, y + h), (x, y)))
+        return segments
 
 
-class TacticalGame(arcade.Window):
-    def __init__(self):
-        super().__init__(SCREEN_WIDTH, SCREEN_HEIGHT, SCREEN_TITLE)
-        arcade.set_background_color(arcade.color.BLACK)
-        self.map = Map()
-        self.player = Player(200, 200)
-        self.enemies: List[Enemy] = []
-        self.bullets: List[Bullet] = []
-        self.keys = set()
-        self.vision_polygon = []
-        self.fog_width = SCREEN_WIDTH // FOG_CELL + 2
-        self.fog_height = SCREEN_HEIGHT // FOG_CELL + 2
-        self.fog_seen = [[False for _ in range(self.fog_height)] for _ in range(self.fog_width)]
-        self.fog_current = [[False for _ in range(self.fog_height)] for _ in range(self.fog_width)]
-        self.game_over = False
-        self.victory = False
-        self.init_enemies()
+# --- Player ---
+class Player:
+    def __init__(self, x, y):
+        self.pos = pygame.math.Vector2(x, y)
+        self.angle = 0
+        self.health = 100
+        self.radius = PLAYER_RADIUS
+        self.reload = 0
 
-    def init_enemies(self):
-        self.enemies.append(Enemy(350, 300, patrol=[(350, 300), (470, 300)]))
-        self.enemies.append(Enemy(800, 280, patrol=[(800, 280), (980, 280)]))
-        self.enemies.append(Enemy(250, 620, patrol=[(250, 620), (440, 620)]))
-        self.enemies.append(Enemy(960, 620, patrol=[(960, 620), (760, 620)]))
+    def update(self, dt, keys, game_map):
+        move = pygame.math.Vector2(0, 0)
+        if keys[pygame.K_w]: move.y -= 1
+        if keys[pygame.K_s]: move.y += 1
+        if keys[pygame.K_a]: move.x -= 1
+        if keys[pygame.K_d]: move.x += 1
+        if move.length_squared() > 0:
+            move = move.normalize() * PLAYER_SPEED * dt
+            newpos = self.pos + move
+            rect = (newpos.x - self.radius, newpos.y - self.radius, self.radius * 2, self.radius * 2)
+            if not game_map.collides(rect):
+                self.pos = newpos
 
-    def on_draw(self):
-        arcade.start_render()
-        self.map.draw()
-        for enemy in self.enemies:
-            if enemy.health <= 0:
-                continue
-            arcade.draw_circle_filled(enemy.x, enemy.y, 12, arcade.color.DARK_RED)
-            enemy.draw()
-        self.player.draw()
-        for bullet in self.bullets:
-            bullet.draw()
+    def set_aim(self, mx, my):
+        self.angle = math.atan2(my - self.pos.y, mx - self.pos.x)
 
-        self.draw_vision_and_fog()
-        self.draw_ui()
+    def draw(self, surf, is_faint=False):
+        color = (50, 220, 255) if not is_faint else (60, 130, 180)
+        pygame.draw.circle(surf, color, (int(self.pos.x), int(self.pos.y)), self.radius)
+        dx = math.cos(self.angle) * self.radius
+        dy = math.sin(self.angle) * self.radius
+        pygame.draw.line(surf, (255, 255, 255), (self.pos.x, self.pos.y), (self.pos.x + dx, self.pos.y + dy), 3)
 
-    def draw_ui(self):
-        arcade.draw_text(f"Health: {self.player.health}", 20, SCREEN_HEIGHT - 30, arcade.color.WHITE, 14)
-        arcade.draw_text(f"Enemies left: {len([e for e in self.enemies if e.health > 0])}", 160, SCREEN_HEIGHT - 30, arcade.color.WHITE, 14)
-        if self.game_over:
-            msg = "VICTORY" if self.victory else "DEFEAT"
-            color = arcade.color.LIME if self.victory else arcade.color.RED
-            arcade.draw_text(msg, SCREEN_WIDTH/2 - 120, SCREEN_HEIGHT/2, color, 48, anchor_x="center")
-            arcade.draw_text("Press R to restart", SCREEN_WIDTH/2 - 110, SCREEN_HEIGHT/2 - 60, arcade.color.WHITE, 20, anchor_x="center")
 
-    def draw_vision_and_fog(self):
-        # compute visible polygon each frame
-        self.vision_polygon = self.compute_vision_cone(self.player.x, self.player.y, self.player.angle, PLAYER_FOV_DEGREES, PLAYER_VIEW_DISTANCE)
-        self.update_fog()
+# --- Enemy ---
+class Enemy:
+    def __init__(self, x, y, patrol=None):
+        self.pos = pygame.math.Vector2(x, y)
+        self.angle = 0
+        self.health = 100
+        self.radius = ENEMY_RADIUS
+        self.patrol = patrol or []
+        self.patrol_idx = 0
+        self.state = 'guard'
+        self.seen_player = False
+        self.shoot_timer = 0
 
-        # draw dark overlay by per-cell
-        for i in range(self.fog_width):
-            for j in range(self.fog_height):
-                x = i * FOG_CELL
-                y = j * FOG_CELL
-                visible_now = self.fog_current[i][j]
-                seen = self.fog_seen[i][j]
-                if visible_now:
-                    continue
-                alpha = 200 if not seen else 120
-                arcade.draw_lrtb_rectangle_filled(x, x + FOG_CELL, y + FOG_CELL, y, (0, 0, 0, alpha))
-
-        # Draw vision cone edge
-        if len(self.vision_polygon) > 2:
-            arcade.draw_polygon_outline(self.vision_polygon, arcade.color.LIGHT_YELLOW, 1)
-
-    def update_fog(self):
-        # reset current
-        for i in range(self.fog_width):
-            for j in range(self.fog_height):
-                self.fog_current[i][j] = False
-        # fill cells that are in polygon
-        for i in range(self.fog_width):
-            for j in range(self.fog_height):
-                cx = i * FOG_CELL + FOG_CELL / 2
-                cy = j * FOG_CELL + FOG_CELL / 2
-                if self.point_in_polygon((cx, cy), self.vision_polygon):
-                    self.fog_current[i][j] = True
-                    self.fog_seen[i][j] = True
-
-    def point_in_polygon(self, point, poly):
-        # ray casting
-        x, y = point
-        inside = False
-        n = len(poly)
-        for i in range(n):
-            x1, y1 = poly[i]
-            x2, y2 = poly[(i + 1) % n]
-            if ((y1 > y) != (y2 > y)) and (x < (x2 - x1) * (y - y1) / (y2 - y1 + 1e-9) + x1):
-                inside = not inside
-        return inside
-
-    def compute_vision_cone(self, px, py, angle, fov, distance):
-        segments = [wall for wall in self.map.walls]
-        vision_points = []
-        half = fov / 2
-        step = 2
-        for a in range(-int(half), int(half)+1, step):
-            ray_angle = angle + math.radians(a)
-            dx = math.cos(ray_angle)
-            dy = math.sin(ray_angle)
-            far_x = px + dx * distance
-            far_y = py + dy * distance
-            closest = (far_x, far_y)
-            closest_d = distance
-            for wall in segments:
-                inter = segment_intersection((px, py), (far_x, far_y), (wall.x1, wall.y1), (wall.x2, wall.y2))
-                if inter:
-                    d = dist((px, py), inter)
-                    if d < closest_d:
-                        closest_d = d
-                        closest = inter
-            vision_points.append(closest)
-        return [(px, py)] + vision_points
-
-    def on_update(self, delta_time):
-        if self.game_over:
+    def update(self, dt, player, game_map):
+        if self.health <= 0:
             return
-        # update player movement
-        vx = vy = 0
-        if arcade.key.W in self.keys:
-            vy += 1
-        if arcade.key.S in self.keys:
-            vy -= 1
-        if arcade.key.A in self.keys:
-            vx -= 1
-        if arcade.key.D in self.keys:
-            vx += 1
-        mag = math.hypot(vx, vy)
-        if mag > 0:
-            vx /= mag
-            vy /= mag
-        self.player.vx = vx
-        self.player.vy = vy
-        self.player.update(delta_time, self.map.walls)
+        self.angle = math.atan2(player.pos.y - self.pos.y, player.pos.x - self.pos.x)
+        if self.can_see_player(player, game_map):
+            self.state = 'engage'
+            self.seen_player = True
+        elif self.state == 'engage':
+            self.state = 'guard'
 
-        # Enemy updates
+        if self.state == 'engage':
+            dir = (player.pos - self.pos)
+            if dir.length_squared() > 4:
+                dir = dir.normalize() * ENEMY_SPEED * dt
+                newpos = self.pos + dir
+                rect = (newpos.x - self.radius, newpos.y - self.radius, self.radius * 2, self.radius * 2)
+                if not game_map.collides(rect):
+                    self.pos = newpos
+            self.shoot_timer += dt
+        else:
+            self.patrol_timer(dt, game_map)
+
+    def patrol_timer(self, dt, game_map):
+        if not self.patrol:
+            return
+        target = pygame.math.Vector2(self.patrol[self.patrol_idx])
+        dir = target - self.pos
+        if dir.length_squared() < 25:
+            self.patrol_idx = (self.patrol_idx + 1) % len(self.patrol)
+            return
+        dir = dir.normalize() * ENEMY_SPEED * dt
+        newpos = self.pos + dir
+        rect = (newpos.x - self.radius, newpos.y - self.radius, self.radius * 2, self.radius * 2)
+        if not game_map.collides(rect):
+            self.pos = newpos
+
+    def can_see_player(self, player, game_map):
+        if self.health <= 0:
+            return False
+        d = player.pos - self.pos
+        dist2 = d.length_squared()
+        if dist2 > ENEMY_VIEW_DISTANCE**2:
+            return False
+        angle_to_player = math.atan2(d.y, d.x)
+        delta = (angle_to_player - self.angle + math.pi) % (2*math.pi) - math.pi
+        if abs(delta) > ENEMY_FOV / 2:
+            return False
+        if line_intersects_walls(self.pos, player.pos, game_map.walls):
+            return False
+        for door in game_map.doors:
+            if not door[4] and line_intersects_walls(self.pos, player.pos, [door[:4]]):
+                return False
+        return True
+
+    def draw(self, surf, is_faint=False):
+        if self.health <= 0:
+            return
+        color = (220, 60, 60) if not is_faint else (130, 70, 70)
+        pygame.draw.circle(surf, color, (int(self.pos.x), int(self.pos.y)), self.radius)
+        dx = math.cos(self.angle) * self.radius
+        dy = math.sin(self.angle) * self.radius
+        pygame.draw.line(surf, (255, 255, 0), (self.pos.x, self.pos.y), (self.pos.x + dx, self.pos.y + dy), 2)
+
+
+# --- Bullet ---
+class Bullet:
+    def __init__(self, x, y, angle, owner):
+        self.pos = pygame.math.Vector2(x, y)
+        self.vel = pygame.math.Vector2(math.cos(angle), math.sin(angle)) * BULLET_SPEED
+        self.life = BULLET_LIFETIME
+        self.owner = owner
+
+    def update(self, dt):
+        self.pos += self.vel * dt
+        self.life -= dt
+
+    def draw(self, surf):
+        pygame.draw.circle(surf, (255, 230, 100), (int(self.pos.x), int(self.pos.y)), 4)
+
+
+# --- Vision System ---
+class Vision:
+    def __init__(self, game_map):
+        self.game_map = game_map
+        self.approx = []
+
+    def compute_fov_polygon(self, player):
+        start = (player.pos.x, player.pos.y)
+        segments = self.game_map.get_block_segments()
+        points = []
+        ray_count = 80
+        for i in range(ray_count + 1):
+            angle = player.angle - PLAYER_FOV/2 + (PLAYER_FOV * i / ray_count)
+            dx = math.cos(angle)
+            dy = math.sin(angle)
+            best = None
+            best_dist = PLAYER_VIEW_DISTANCE
+            end = (start[0] + dx * PLAYER_VIEW_DISTANCE, start[1] + dy * PLAYER_VIEW_DISTANCE)
+            for seg in segments:
+                r = segment_intersect(start, end, seg[0], seg[1])
+                if r:
+                    ix, iy, t, u = r
+                    d = math.hypot(ix - start[0], iy - start[1])
+                    if d < best_dist:
+                        best = (ix, iy)
+                        best_dist = d
+            if best is None:
+                points.append(end)
+            else:
+                points.append(best)
+        poly = [start] + points
+        return poly
+
+
+# --- Game ---
+class Game:
+    def __init__(self):
+        pygame.init()
+        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        pygame.display.set_caption("Breach Point: CQB Demo")
+        self.clock = pygame.time.Clock()
+        self.font = pygame.font.SysFont(None, 30)
+
+        self.game_map = Map()
+        self.player = Player(170, 120)
+        self.enemies = [
+            Enemy(500, 220, [(500, 220), (620, 220), (620, 300), (500, 300)]),
+            Enemy(980, 500, [(980, 500), (1080, 500), (1080, 600), (980, 600)]),
+            Enemy(620, 120, []),
+        ]
+        self.bullets = []
+        self.vision = Vision(self.game_map)
+
+        self.explored = [[False] * (SCREEN_WIDTH // GRID_SIZE + 1) for _ in range(SCREEN_HEIGHT // GRID_SIZE + 1)]
+
+        self.victory = False
+        self.defeat = False
+
+    def run(self):
+        while True:
+            dt = self.clock.tick(FPS) / 1000.0
+            self.handle_events()
+            if not self.victory and not self.defeat:
+                self.update(dt)
+            self.draw()
+
+    def handle_events(self):
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    pygame.quit(); sys.exit()
+                if event.key == pygame.K_e:
+                    self.game_map.toggle_door_at(self.player.pos.x, self.player.pos.y)
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if not self.victory and not self.defeat:
+                    self.fire_bullet()
+
+    def fire_bullet(self):
+        b = Bullet(self.player.pos.x + math.cos(self.player.angle) * 20,
+                   self.player.pos.y + math.sin(self.player.angle) * 20,
+                   self.player.angle,
+                   'player')
+        self.bullets.append(b)
+
+    def update(self, dt):
+        mx, my = pygame.mouse.get_pos()
+        keys = pygame.key.get_pressed()
+        self.player.set_aim(mx, my)
+        self.player.update(dt, keys, self.game_map)
+
         for enemy in self.enemies:
-            enemy.update(delta_time, self.player, self.map.walls)
-            # enemy shooting player
-            seen, distp = enemy.can_see_player(self.player, self.map.walls)
-            if seen and distp < ENEMY_VIEW_DISTANCE and enemy.shoot_cd <= 0:
-                enemy.shoot_cd = 0.7
-                # direct instant hit if player in range
-                if distp < 220:
-                    self.player.health -= 12
-                    if self.player.health <= 0:
-                        self.player.health = 0
-                        self.game_over = True
-                        self.victory = False
+            enemy.update(dt, self.player, self.game_map)
 
-        # bullets
-        new_bullets = []
-        for bullet in self.bullets:
-            bullet.update(delta_time)
-            if bullet.life <= 0:
-                continue
-            hit = False
-            for enemy in self.enemies:
-                if enemy.health <= 0:
-                    continue
-                if dist((bullet.x, bullet.y), (enemy.x, enemy.y)) < 16:
-                    enemy.health -= 40
-                    hit = True
-                    break
-            if hit:
-                continue
-            if bullet.x < 0 or bullet.x > SCREEN_WIDTH or bullet.y < 0 or bullet.y > SCREEN_HEIGHT:
-                continue
-            # barrier collisions
-            blocked = False
-            for w in self.map.walls:
-                if abs((w.y2 - w.y1) * bullet.x - (w.x2 - w.x1) * bullet.y + w.x2 * w.y1 - w.y2 * w.x1) < 20:
-                    blocked = True
-                    break
-            if blocked:
-                continue
-            new_bullets.append(bullet)
-        self.bullets = new_bullets
+        for b in self.bullets:
+            b.update(dt)
 
+        self.handle_bullets()
+        self.update_visibility()
+        self.check_game_state()
+
+    def handle_bullets(self):
+        next_bullets = []
+        for b in self.bullets:
+            if b.life <= 0:
+                continue
+            if b.pos.x < 0 or b.pos.x > SCREEN_WIDTH or b.pos.y < 0 or b.pos.y > SCREEN_HEIGHT:
+                continue
+            # wall collision
+            if self.game_map.collides((b.pos.x - 2, b.pos.y - 2, 4, 4)):
+                continue
+
+            if b.owner == 'player':
+                for enemy in self.enemies:
+                    if enemy.health > 0 and dist((b.pos.x, b.pos.y), enemy.pos) < enemy.radius + 3:
+                        enemy.health -= 50
+                        break
+                else:
+                    next_bullets.append(b)
+            else:
+                if dist((b.pos.x, b.pos.y), self.player.pos) < self.player.radius + 4:
+                    self.player.health -= 25
+                else:
+                    next_bullets.append(b)
+        self.bullets = next_bullets
+
+        # enemy shooting into player when in view
+        for enemy in self.enemies:
+            if enemy.health > 0 and enemy.state == 'engage':
+                if enemy.shoot_timer >= 0.7:
+                    d = self.player.pos - enemy.pos
+                    if d.length_squared() < ENEMY_VIEW_DISTANCE**2:
+                        enemy.shoot_timer = 0
+                        angle = math.atan2(d.y, d.x)
+                        self.bullets.append(Bullet(enemy.pos.x + math.cos(angle) * 18,
+                                                   enemy.pos.y + math.sin(angle) * 18,
+                                                   angle, 'enemy'))
+
+    def update_visibility(self):
+        poly = self.vision.compute_fov_polygon(self.player)
+        minx = max(0, int(self.player.pos.x - PLAYER_VIEW_DISTANCE))
+        maxx = min(SCREEN_WIDTH - 1, int(self.player.pos.x + PLAYER_VIEW_DISTANCE))
+        miny = max(0, int(self.player.pos.y - PLAYER_VIEW_DISTANCE))
+        maxy = min(SCREEN_HEIGHT - 1, int(self.player.pos.y + PLAYER_VIEW_DISTANCE))
+        for gy in range(miny // GRID_SIZE, maxy // GRID_SIZE + 1):
+            for gx in range(minx // GRID_SIZE, maxx // GRID_SIZE + 1):
+                cx = gx * GRID_SIZE + GRID_SIZE / 2
+                cy = gy * GRID_SIZE + GRID_SIZE / 2
+                if point_in_polygon(cx, cy, poly):
+                    if 0 <= gy < len(self.explored) and 0 <= gx < len(self.explored[0]):
+                        self.explored[gy][gx] = True
+
+    def check_game_state(self):
+        if self.player.health <= 0:
+            self.defeat = True
         if all(enemy.health <= 0 for enemy in self.enemies):
-            self.game_over = True
             self.victory = True
 
-    def on_key_press(self, key, modifiers):
-        if key == arcade.key.R and self.game_over:
-            self.__init__()
-            return
-        if key == arcade.key.E:
-            # interact with doors could open/close eventually
-            pass
-        self.keys.add(key)
+    def draw(self):
+        self.screen.fill((0,0,0))
 
-    def on_key_release(self, key, modifiers):
-        if key in self.keys:
-            self.keys.remove(key)
+        # Draw memory floor/walls faintly for discovered areas
+        for gy in range(len(self.explored)):
+            for gx in range(len(self.explored[0])):
+                if self.explored[gy][gx]:
+                    cell_rect = pygame.Rect(gx * GRID_SIZE, gy * GRID_SIZE, GRID_SIZE, GRID_SIZE)
+                    pygame.draw.rect(self.screen, (30, 30, 30), cell_rect)
 
-    def on_mouse_motion(self, x, y, dx, dy):
-        self.player.angle = math.atan2(y - self.player.y, x - self.player.x)
+        # Draw walls and doors for discovered
+        for wall in self.game_map.walls:
+            if self.rect_discovered(wall):
+                pygame.draw.rect(self.screen, (80, 80, 80), wall)
+        for door in self.game_map.doors:
+            if self.rect_discovered(door[:4]):
+                c = (130, 80, 40) if not door[4] else (100, 140, 90)
+                pygame.draw.rect(self.screen, c, (door[0], door[1], door[2], door[3]))
 
-    def on_mouse_press(self, x, y, button, modifiers):
-        if button == arcade.MOUSE_BUTTON_LEFT and not self.game_over:
-            bullet = self.player.shoot(x, y)
-            if bullet:
-                self.bullets.append(bullet)
+        # Draw memory player / enemies dim if discovered
+        self.player.draw(self.screen, is_faint=True)
+        for enemy in self.enemies:
+            enemy.draw(self.screen, is_faint=True)
 
+        # Draw world objects when in current FOV
+        poly = self.vision.compute_fov_polygon(self.player)
+        self.draw_visible_objects(poly)
 
-def main():
-    game = TacticalGame()
-    arcade.run()
+        # Fog overlay
+        fog = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        fog.fill((0,0,0,220))
+        pygame.draw.polygon(fog, (0,0,0,0), poly)
+        self.screen.blit(fog, (0,0))
+
+        self.draw_ui()
+        pygame.display.flip()
+
+    def rect_discovered(self, rect):
+        x, y, w, h = rect
+        mx = int((x + w / 2) // GRID_SIZE)
+        my = int((y + h / 2) // GRID_SIZE)
+        if 0 <= my < len(self.explored) and 0 <= mx < len(self.explored[0]):
+            return self.explored[my][mx]
+        return False
+
+    def draw_visible_objects(self, poly):
+        # draw floor in fov
+        clip = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        clip.fill((0,0,0,0))
+        pygame.draw.polygon(clip, (255,255,255,255), poly)
+
+        # draw map details in fov
+        temp = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        # floor texture
+        for y in range(0, SCREEN_HEIGHT, 64):
+            for x in range(0, SCREEN_WIDTH, 64):
+                pygame.draw.rect(temp, (120, 120, 120), (x, y, 64, 64))
+        for wall in self.game_map.walls:
+            pygame.draw.rect(temp, (200, 200, 200), wall)
+        for door in self.game_map.doors:
+            c = (120, 60, 20) if not door[4] else (90, 140, 90)
+            pygame.draw.rect(temp, c, (door[0], door[1], door[2], door[3]))
+
+        # dynamic objects current fov
+        self.player.draw(temp, is_faint=False)
+        for enemy in self.enemies:
+            if enemy.health > 0 and point_in_polygon(enemy.pos.x, enemy.pos.y, poly):
+                enemy.draw(temp, is_faint=False)
+        for b in self.bullets:
+            if point_in_polygon(b.pos.x, b.pos.y, poly):
+                b.draw(temp)
+
+        temp.blit(clip, (0,0), special_flags=pygame.BLEND_RGBA_MULT)
+        self.screen.blit(temp, (0,0))
+
+    def draw_ui(self):
+        health_text = self.font.render(f"Health: {self.player.health}", True, (255,255,255))
+        self.screen.blit(health_text, (20, 20))
+
+        alive = sum(1 for e in self.enemies if e.health > 0)
+        enemy_text = self.font.render(f"Enemies Remaining: {alive}", True, (255,255,255))
+        self.screen.blit(enemy_text, (20, 50))
+
+        self.screen.blit(self.font.render("WASD move, Mouse aim, Left click shoot, E open doors", True, (200,200,200)), (20, SCREEN_HEIGHT - 40))
+
+        if self.victory:
+            v = self.font.render("VICTORY - Building Cleared!", True, (30, 255, 30))
+            self.screen.blit(v, (SCREEN_WIDTH//2 - v.get_width()//2, SCREEN_HEIGHT//2 - 20))
+        if self.defeat:
+            d = self.font.render("DEFEAT - You Died", True, (255, 50, 50))
+            self.screen.blit(d, (SCREEN_WIDTH//2 - d.get_width()//2, SCREEN_HEIGHT//2 - 20))
 
 
 if __name__ == "__main__":
-    main()
+    game = Game()
+    game.run()
