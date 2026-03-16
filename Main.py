@@ -122,7 +122,7 @@ class Map:
 
     def draw(self, surf, is_faint=False):
         # floor
-        floor = (80, 80, 80) if is_faint else (125, 125, 125)
+        floor = (128, 128, 128) if is_faint else (211, 211, 211)
         surf.fill((220, 220, 220))
         for y in range(0, SCREEN_HEIGHT, 64):
             for x in range(0, SCREEN_WIDTH, 64):
