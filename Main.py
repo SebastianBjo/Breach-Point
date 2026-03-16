@@ -451,45 +451,44 @@ class Game:
             self.victory = True
 
    def draw(self):
-    # 1. Start with a clean black slate
+    # 1. Clean black slate
     self.screen.fill((0,0,0))
 
-    # 2. Prepare the FOV Polygon (Where the player is looking)
+    # 2. Get the player's current field of view
     poly = self.vision.compute_fov_polygon(self.player)
 
-    # 3. DRAW THE FOG FIRST (This creates the 'darkness' layer)
+    # 3. Create the Fog (Background Darkness)
     fog = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-    fog.fill((0, 0, 0, 255))  # Pure black fog
-    pygame.draw.polygon(fog, (0, 0, 0, 0), poly)  # Cut a hole for current vision
+    fog.fill((0, 0, 0, 255))  # Pure black
+    if len(poly) > 2:
+        pygame.draw.polygon(fog, (0, 0, 0, 0), poly) # Cut out current vision
     self.screen.blit(fog, (0, 0))
 
-    # 4. DRAW MEMORY (Discovered areas) 
-    # We draw this AFTER the fog so it is visible in the dark areas
+    # 4. Draw "Memories" on top of the dark fog
     for gy in range(len(self.explored)):
         for gx in range(len(self.explored[0])):
             if self.explored[gy][gx]:
                 cell_rect = pygame.Rect(gx * GRID_SIZE, gy * GRID_SIZE, GRID_SIZE, GRID_SIZE)
-                # Use a dim gray (40,40,40) so it looks like a faint memory
                 pygame.draw.rect(self.screen, (40, 40, 40), cell_rect)
 
-    # Draw faint walls/doors that have been discovered
+    # Draw faint walls/doors for explored areas
     for wall in self.game_map.walls:
         if self.rect_discovered(wall):
             pygame.draw.rect(self.screen, (60, 60, 60), wall)
             
     for door in self.game_map.doors:
         if self.rect_discovered(door[:4]):
-            c = (70, 40, 20) if not door[4] else (50, 70, 45) # Dimmest door colors
+            # Darkened door colors (brown or green)
+            c = (70, 40, 20) if not door[4] else (50, 70, 45)
             pygame.draw.rect(self.screen, c, (door[0], door[1], door[2], door[3]))
 
-    # 5. DRAW THE 'NOW' (Bright Vision)
-    # This draws the high-detail, bright version over the memory
+    # 5. Draw the "Bright Now" (Current FOV)
+    # This draws over the memory with full colors/moving enemies
     self.draw_visible_objects(poly)
 
-    # 6. UI and Update
+    # 6. UI
     self.draw_ui()
     pygame.display.flip()
-
 
 if __name__ == "__main__":
     game = Game()
