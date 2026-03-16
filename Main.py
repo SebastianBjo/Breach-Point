@@ -450,7 +450,7 @@ class Game:
         if all(enemy.health <= 0 for enemy in self.enemies):
             self.victory = True
 
-   def draw(self):
+    def draw(self):
     # 1. Clean black slate
     self.screen.fill((0,0,0))
 
