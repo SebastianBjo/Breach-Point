@@ -122,14 +122,14 @@ class Map:
 
     def draw(self, surf, is_faint=False):
         # floor
-        floor = (128, 128, 128) if is_faint else (211, 211, 211)
-        surf.fill((220, 220, 220))
+        floor = (80, 80, 80) if is_faint else (125, 125, 125)
+        surf.fill((20, 20, 20))
         for y in range(0, SCREEN_HEIGHT, 64):
             for x in range(0, SCREEN_WIDTH, 64):
                 pygame.draw.rect(surf, floor, (x, y, 64, 64), 0)
                 pygame.draw.rect(surf, (floor[0]+10, floor[1]+10, floor[2]+10), (x, y, 64, 64), 1)
 
-        wall_color = (66, 68, 74) if is_faint else (180, 180, 180)
+        wall_color = (60, 60, 60) if is_faint else (180, 180, 180)
         for wall in self.walls:
             pygame.draw.rect(surf, wall_color, wall)
         for door in self.doors:
@@ -293,7 +293,6 @@ class Vision:
     def __init__(self, game_map):
         self.game_map = game_map
         self.approx = []
-        self.seen_tiles = set()
 
     def compute_fov_polygon(self, player):
         start = (player.pos.x, player.pos.y)
@@ -331,8 +330,6 @@ class Game:
         pygame.display.set_caption("Breach Point: CQB Demo")
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont(None, 30)
-        self.memory_surf = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
-        self.memory_surf.fill((0, 0, 0))
 
         self.game_map = Map()
         self.player = Player(170, 120)
@@ -451,35 +448,97 @@ class Game:
             self.victory = True
 
     def draw(self):
-        # Everything from here down must be indented 4 spaces further than the line above
         self.screen.fill((0,0,0))
 
-        poly = self.vision.compute_fov_polygon(self.player)
-
-        fog = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        fog.fill((0, 0, 0, 255)) 
-        if len(poly) > 2:
-            pygame.draw.polygon(fog, (0, 0, 0, 0), poly)
-        self.screen.blit(fog, (0, 0))
-
+        # Draw memory floor/walls faintly for discovered areas
         for gy in range(len(self.explored)):
             for gx in range(len(self.explored[0])):
                 if self.explored[gy][gx]:
-                    cell_rect = pygame.Rect(gx * 64, gy * 64, 64, 64) # Replace 64 with GRID_SIZE if needed
-                    pygame.draw.rect(self.screen, (40, 40, 40), cell_rect)
+                    cell_rect = pygame.Rect(gx * GRID_SIZE, gy * GRID_SIZE, GRID_SIZE, GRID_SIZE)
+                    pygame.draw.rect(self.screen, (30, 30, 30), cell_rect)
 
+        # Draw walls and doors for discovered
         for wall in self.game_map.walls:
             if self.rect_discovered(wall):
-                pygame.draw.rect(self.screen, (60, 60, 60), wall)
-        
+                pygame.draw.rect(self.screen, (80, 80, 80), wall)
         for door in self.game_map.doors:
             if self.rect_discovered(door[:4]):
-                c = (70, 40, 20) if not door[4] else (50, 70, 45)
+                c = (130, 80, 40) if not door[4] else (100, 140, 90)
                 pygame.draw.rect(self.screen, c, (door[0], door[1], door[2], door[3]))
 
+        # Draw memory player / enemies dim if discovered
+        self.player.draw(self.screen, is_faint=True)
+        for enemy in self.enemies:
+            enemy.draw(self.screen, is_faint=True)
+
+        # Draw world objects when in current FOV
+        poly = self.vision.compute_fov_polygon(self.player)
         self.draw_visible_objects(poly)
+
+        # Fog overlay
+        fog = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        fog.fill((0,0,0,220))
+        pygame.draw.polygon(fog, (0,0,0,0), poly)
+        self.screen.blit(fog, (0,0))
+
         self.draw_ui()
         pygame.display.flip()
+
+    def rect_discovered(self, rect):
+        x, y, w, h = rect
+        mx = int((x + w / 2) // GRID_SIZE)
+        my = int((y + h / 2) // GRID_SIZE)
+        if 0 <= my < len(self.explored) and 0 <= mx < len(self.explored[0]):
+            return self.explored[my][mx]
+        return False
+
+    def draw_visible_objects(self, poly):
+        # draw floor in fov
+        clip = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        clip.fill((0,0,0,0))
+        pygame.draw.polygon(clip, (255,255,255,255), poly)
+
+        # draw map details in fov
+        temp = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        # floor texture
+        for y in range(0, SCREEN_HEIGHT, 64):
+            for x in range(0, SCREEN_WIDTH, 64):
+                pygame.draw.rect(temp, (120, 120, 120), (x, y, 64, 64))
+        for wall in self.game_map.walls:
+            pygame.draw.rect(temp, (200, 200, 200), wall)
+        for door in self.game_map.doors:
+            c = (120, 60, 20) if not door[4] else (90, 140, 90)
+            pygame.draw.rect(temp, c, (door[0], door[1], door[2], door[3]))
+
+        # dynamic objects current fov
+        self.player.draw(temp, is_faint=False)
+        for enemy in self.enemies:
+            if enemy.health > 0 and point_in_polygon(enemy.pos.x, enemy.pos.y, poly):
+                enemy.draw(temp, is_faint=False)
+        for b in self.bullets:
+            if point_in_polygon(b.pos.x, b.pos.y, poly):
+                b.draw(temp)
+
+        temp.blit(clip, (0,0), special_flags=pygame.BLEND_RGBA_MULT)
+        self.screen.blit(temp, (0,0))
+
+    def draw_ui(self):
+        health_text = self.font.render(f"Health: {self.player.health}", True, (255,255,255))
+        self.screen.blit(health_text, (20, 20))
+
+        alive = sum(1 for e in self.enemies if e.health > 0)
+        enemy_text = self.font.render(f"Enemies Remaining: {alive}", True, (255,255,255))
+        self.screen.blit(enemy_text, (20, 50))
+
+        self.screen.blit(self.font.render("WASD move, Mouse aim, Left click shoot, E open doors", True, (200,200,200)), (20, SCREEN_HEIGHT - 40))
+
+        if self.victory:
+            v = self.font.render("VICTORY - Building Cleared!", True, (30, 255, 30))
+            self.screen.blit(v, (SCREEN_WIDTH//2 - v.get_width()//2, SCREEN_HEIGHT//2 - 20))
+        if self.defeat:
+            d = self.font.render("DEFEAT - You Died", True, (255, 50, 50))
+            self.screen.blit(d, (SCREEN_WIDTH//2 - d.get_width()//2, SCREEN_HEIGHT//2 - 20))
+
 
 if __name__ == "__main__":
     game = Game()
