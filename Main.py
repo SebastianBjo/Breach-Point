@@ -293,6 +293,7 @@ class Vision:
     def __init__(self, game_map):
         self.game_map = game_map
         self.approx = []
+        self.seen_tiles = set()
 
     def compute_fov_polygon(self, player):
         start = (player.pos.x, player.pos.y)
@@ -330,6 +331,8 @@ class Game:
         pygame.display.set_caption("Breach Point: CQB Demo")
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont(None, 30)
+        self.memory_surf = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+        self.memory_surf.fill((0, 0, 0))
 
         self.game_map = Map()
         self.player = Player(170, 120)
