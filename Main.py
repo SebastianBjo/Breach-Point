@@ -129,7 +129,7 @@ class Map:
                 pygame.draw.rect(surf, floor, (x, y, 64, 64), 0)
                 pygame.draw.rect(surf, (floor[0]+10, floor[1]+10, floor[2]+10), (x, y, 64, 64), 1)
 
-        wall_color = (60, 60, 60) if is_faint else (180, 180, 180)
+        wall_color = (66, 68, 74) if is_faint else (180, 180, 180)
         for wall in self.walls:
             pygame.draw.rect(surf, wall_color, wall)
         for door in self.doors:
