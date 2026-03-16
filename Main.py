@@ -450,97 +450,45 @@ class Game:
         if all(enemy.health <= 0 for enemy in self.enemies):
             self.victory = True
 
-    def draw(self):
-        self.screen.fill((0,0,0))
+   def draw(self):
+    # 1. Start with a clean black slate
+    self.screen.fill((0,0,0))
 
-        # Draw memory floor/walls faintly for discovered areas
-        for gy in range(len(self.explored)):
-            for gx in range(len(self.explored[0])):
-                if self.explored[gy][gx]:
-                    cell_rect = pygame.Rect(gx * GRID_SIZE, gy * GRID_SIZE, GRID_SIZE, GRID_SIZE)
-                    pygame.draw.rect(self.screen, (30, 30, 30), cell_rect)
+    # 2. Prepare the FOV Polygon (Where the player is looking)
+    poly = self.vision.compute_fov_polygon(self.player)
 
-        # Draw walls and doors for discovered
-        for wall in self.game_map.walls:
-            if self.rect_discovered(wall):
-                pygame.draw.rect(self.screen, (80, 80, 80), wall)
-        for door in self.game_map.doors:
-            if self.rect_discovered(door[:4]):
-                c = (130, 80, 40) if not door[4] else (100, 140, 90)
-                pygame.draw.rect(self.screen, c, (door[0], door[1], door[2], door[3]))
+    # 3. DRAW THE FOG FIRST (This creates the 'darkness' layer)
+    fog = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+    fog.fill((0, 0, 0, 255))  # Pure black fog
+    pygame.draw.polygon(fog, (0, 0, 0, 0), poly)  # Cut a hole for current vision
+    self.screen.blit(fog, (0, 0))
 
-        # Draw memory player / enemies dim if discovered
-        self.player.draw(self.screen, is_faint=True)
-        for enemy in self.enemies:
-            enemy.draw(self.screen, is_faint=True)
+    # 4. DRAW MEMORY (Discovered areas) 
+    # We draw this AFTER the fog so it is visible in the dark areas
+    for gy in range(len(self.explored)):
+        for gx in range(len(self.explored[0])):
+            if self.explored[gy][gx]:
+                cell_rect = pygame.Rect(gx * GRID_SIZE, gy * GRID_SIZE, GRID_SIZE, GRID_SIZE)
+                # Use a dim gray (40,40,40) so it looks like a faint memory
+                pygame.draw.rect(self.screen, (40, 40, 40), cell_rect)
 
-        # Draw world objects when in current FOV
-        poly = self.vision.compute_fov_polygon(self.player)
-        self.draw_visible_objects(poly)
+    # Draw faint walls/doors that have been discovered
+    for wall in self.game_map.walls:
+        if self.rect_discovered(wall):
+            pygame.draw.rect(self.screen, (60, 60, 60), wall)
+            
+    for door in self.game_map.doors:
+        if self.rect_discovered(door[:4]):
+            c = (70, 40, 20) if not door[4] else (50, 70, 45) # Dimmest door colors
+            pygame.draw.rect(self.screen, c, (door[0], door[1], door[2], door[3]))
 
-        # Fog overlay
-        fog = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        fog.fill((0,0,0,220))
-        pygame.draw.polygon(fog, (0,0,0,0), poly)
-        self.screen.blit(fog, (0,0))
+    # 5. DRAW THE 'NOW' (Bright Vision)
+    # This draws the high-detail, bright version over the memory
+    self.draw_visible_objects(poly)
 
-        self.draw_ui()
-        pygame.display.flip()
-
-    def rect_discovered(self, rect):
-        x, y, w, h = rect
-        mx = int((x + w / 2) // GRID_SIZE)
-        my = int((y + h / 2) // GRID_SIZE)
-        if 0 <= my < len(self.explored) and 0 <= mx < len(self.explored[0]):
-            return self.explored[my][mx]
-        return False
-
-    def draw_visible_objects(self, poly):
-        # draw floor in fov
-        clip = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        clip.fill((0,0,0,0))
-        pygame.draw.polygon(clip, (255,255,255,255), poly)
-
-        # draw map details in fov
-        temp = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        # floor texture
-        for y in range(0, SCREEN_HEIGHT, 64):
-            for x in range(0, SCREEN_WIDTH, 64):
-                pygame.draw.rect(temp, (120, 120, 120), (x, y, 64, 64))
-        for wall in self.game_map.walls:
-            pygame.draw.rect(temp, (200, 200, 200), wall)
-        for door in self.game_map.doors:
-            c = (120, 60, 20) if not door[4] else (90, 140, 90)
-            pygame.draw.rect(temp, c, (door[0], door[1], door[2], door[3]))
-
-        # dynamic objects current fov
-        self.player.draw(temp, is_faint=False)
-        for enemy in self.enemies:
-            if enemy.health > 0 and point_in_polygon(enemy.pos.x, enemy.pos.y, poly):
-                enemy.draw(temp, is_faint=False)
-        for b in self.bullets:
-            if point_in_polygon(b.pos.x, b.pos.y, poly):
-                b.draw(temp)
-
-        temp.blit(clip, (0,0), special_flags=pygame.BLEND_RGBA_MULT)
-        self.screen.blit(temp, (0,0))
-
-    def draw_ui(self):
-        health_text = self.font.render(f"Health: {self.player.health}", True, (255,255,255))
-        self.screen.blit(health_text, (20, 20))
-
-        alive = sum(1 for e in self.enemies if e.health > 0)
-        enemy_text = self.font.render(f"Enemies Remaining: {alive}", True, (255,255,255))
-        self.screen.blit(enemy_text, (20, 50))
-
-        self.screen.blit(self.font.render("WASD move, Mouse aim, Left click shoot, E open doors", True, (200,200,200)), (20, SCREEN_HEIGHT - 40))
-
-        if self.victory:
-            v = self.font.render("VICTORY - Building Cleared!", True, (30, 255, 30))
-            self.screen.blit(v, (SCREEN_WIDTH//2 - v.get_width()//2, SCREEN_HEIGHT//2 - 20))
-        if self.defeat:
-            d = self.font.render("DEFEAT - You Died", True, (255, 50, 50))
-            self.screen.blit(d, (SCREEN_WIDTH//2 - d.get_width()//2, SCREEN_HEIGHT//2 - 20))
+    # 6. UI and Update
+    self.draw_ui()
+    pygame.display.flip()
 
 
 if __name__ == "__main__":
