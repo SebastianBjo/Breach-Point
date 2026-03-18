@@ -123,7 +123,7 @@ class Map:
     def draw(self, surf, is_faint=False):
         # floor
         floor = (200, 180, 110) if is_faint else (170, 150, 80)
-        surf.fill((20, 20, 20))
+        surf.fill((200, 180, 110))
         for y in range(0, SCREEN_HEIGHT, 64):
             for x in range(0, SCREEN_WIDTH, 64):
                 pygame.draw.rect(surf, floor, (x, y, 64, 64), 0)
