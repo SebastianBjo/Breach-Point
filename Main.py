@@ -448,7 +448,6 @@ class Game:
             self.victory = True
 
     def draw(self):
-        self.screen.fill((0,0,0))
 
         # Draw memory floor/walls faintly for discovered areas
         for gy in range(len(self.explored)):
