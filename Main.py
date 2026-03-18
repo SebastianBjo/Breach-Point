@@ -120,7 +120,7 @@ class Map:
                 return True
         return False
 
-    def draw(self, surf, is_faint=True):
+    def draw(self, surf, is_faint=False):
         # floor
         floor = (169, 169, 169) if is_faint else (125, 125, 125)
         surf.fill((20, 20, 20))
@@ -446,6 +446,9 @@ class Game:
             self.defeat = True
         if all(enemy.health <= 0 for enemy in self.enemies):
             self.victory = True
+
+    def draw(self):
+        self.screen.fill((0,0,0))
 
         # Draw memory floor/walls faintly for discovered areas
         for gy in range(len(self.explored)):
