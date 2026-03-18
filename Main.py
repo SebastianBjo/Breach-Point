@@ -476,7 +476,7 @@ class Game:
 
         # Fog overlay
         fog = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        fog.fill((0,0,0,220))
+        fog.fill((0,0,0,60))
         pygame.draw.polygon(fog, (0,0,0,0), poly)
         self.screen.blit(fog, (0,0))
 
