@@ -120,7 +120,7 @@ class Map:
                 return True
         return False
 
-    def draw(self, surf, is_faint=False):
+    def draw(self, surf, is_faint=True):
         # floor
         floor = (169, 169, 169) if is_faint else (125, 125, 125)
         surf.fill((20, 20, 20))
