@@ -447,9 +447,6 @@ class Game:
         if all(enemy.health <= 0 for enemy in self.enemies):
             self.victory = True
 
-    def draw(self):
-        self.screen.fill((0,0,0))
-
         # Draw memory floor/walls faintly for discovered areas
         for gy in range(len(self.explored)):
             for gx in range(len(self.explored[0])):
