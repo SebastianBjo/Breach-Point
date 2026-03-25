@@ -133,7 +133,7 @@ class Map:
         for wall in self.walls:
             pygame.draw.rect(surf, wall_color, wall)
         for door in self.doors:
-            color = (80, 30, 0) if not door[4] else (100, 120, 50)
+            color = (130, 70, 30) if not door[4] else (80, 40, 20)
             pygame.draw.rect(surf, color, (door[0], door[1], door[2], door[3]))
 
     def toggle_door_at(self, px, py):
