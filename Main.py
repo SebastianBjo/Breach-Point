@@ -321,6 +321,24 @@ class Vision:
         poly = [start] + points
         return poly
 
+# --- Grenade ---
+class grenade(pygame.sprite.Sprite)
+    def __init__(self, x, y)
+        Super().__init__() # Initialize sprite class
+        # Load image/temporary rectangle model
+        self.image = pygame.Surface((10,10))
+        self.image.fill((90, 120, 30))
+
+        self.rect = self.image.get_rect()
+        self.rect.center =(x, y)
+
+        self.timer = 6 # Basic grenade timer
+
+    def update(self):
+        # Add physics or movement logic here
+        self.timer -= 1
+        if self.timer <= 0:
+            self.kill # Removes sprite from all groups when it "dies"
 
 # --- Game ---
 class Game:
